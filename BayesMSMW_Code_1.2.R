@@ -48,6 +48,7 @@ BayesMSMW <- function(X.list,Y.list,N_sim=11000,burn_in=1000,Alpha=1,Beta=NULL,m
   
   # Initialize objects/parameters
   tau2 <- rep(1,M)
+  
   Var <- list()
   Ww <- rep(1,P)
   cPss <- cumsum(Ps)
@@ -68,6 +69,9 @@ BayesMSMW <- function(X.list,Y.list,N_sim=11000,burn_in=1000,Alpha=1,Beta=NULL,m
   # Matrices storing samples of the parameter
   w_list <- list()
   tauv_chain <- matrix(0, nrow = N_sim, ncol = 1)
+  tau1_chain <- tauv_chain
+  tau2_chain <- tauv_chain
+  v_chain <- list()
   v_list <- list()
   prod_chain <- matrix(0, nrow = N_sim, ncol = (P*d)) 
   y_var_chain <- matrix(0, nrow = N_sim, ncol = 1)
@@ -238,7 +242,7 @@ BayesMSMW <- function(X.list,Y.list,N_sim=11000,burn_in=1000,Alpha=1,Beta=NULL,m
       }
       
       # Compute posterior variance of W
-      Q_0 <- diag(c(rep(tau2_1, R*P)),R*P)
+      Q_0 <- diag(c(rep(tau2, R*P)),R*P)
       prec_0 <- solve(Q_0)
       yv <- diag(1/y_var,R*P)
       Var <- chol2inv(chol(prec_0 + (yv)%*%crossprod(Xa, Xa)))
@@ -310,7 +314,9 @@ BayesMSMW <- function(X.list,Y.list,N_sim=11000,burn_in=1000,Alpha=1,Beta=NULL,m
       iter <- paste("t:",t,sep='')
       w_list[[iter]] <- Ws_r
       tauv_chain[t, ] <- tau2_v
-      tau1_chain[t, ] <- tau2_1
+      tau1_chain[t, ] <- tau2
+      #browser()
+      v_list[[iter]] <- Vs_r
       v_chain[[iter]] <- Vs_r
       prod_chain[t, ] <- as.vector(Ws_r %*% t(Vs_r))
       for(n in 1:N){
@@ -341,7 +347,6 @@ BayesMSMW <- function(X.list,Y.list,N_sim=11000,burn_in=1000,Alpha=1,Beta=NULL,m
   post_probtrain <- probtrain_chain[-(1:burn_in), ]
   post_y_var     <- y_var_chain[-(1:burn_in), ]
   y_var_est <- median(post_y_var)
-  
   Post_B <- colMeans(post_prod_msmw)
   
   
@@ -355,9 +360,13 @@ BayesMSMW <- function(X.list,Y.list,N_sim=11000,burn_in=1000,Alpha=1,Beta=NULL,m
     train_mse <- sum((misclas)^2)/sum((class_tru^2))
   }
   
-  taus2 <- colMeans(post_tau2_msmw)   
-  
-  
+  taus2 <- list()
+  if (is.null(dim(post_tau2_msmw))) {
+    taus2< - post_tau2_msmw
+  }else{
+    taus2 <- colMeans(post_tau2_msmw)   
+  }
+
   output <- list(Post_B,train_mse,taus2,y_var_est,post_y_var,w_list,v_list)
   names(output) <- c("CoefMatrix","TrainErr","Tau2","VarEst","VarChain","Ws","Vs")
   return(output)
@@ -370,13 +379,28 @@ predict.MSMW <- function(Xtest,outcome="binary",R, Ws, Vs,burn_in=1000){
   Nsim <- (length(Ws)-burn)
   pb = txtProgressBar(min = 0, max = Nsim, initial = 0,style = 3) 
   Xx <- Xtest
-  Xxr1 <- matrix(ncol = R)
   Nn <- dim(Xtest)[1]
   probtest_chain <- matrix(0, nrow = Nsim, ncol = Nn)   
+  probs_test <- numeric(Nn)  # Initialize probs_test here
   if(R==1){
     for(t in 1:Nsim){
       W_s <- Ws[[t]]
       V_s <- Vs[[t]]
+      
+      P <- dim(Xx)[2] 
+      d <- dim(Xx)[3] 
+
+      if (length(W_s) > P) {
+        W_s <- W_s[1:P]  
+      } else if (length(W_s) < P) {
+        W_s <- c(W_s, rep(0, P - length(W_s)))  # 补 0
+      }
+      if (length(V_s) > d) {
+        V_s <- V_s[1:d] 
+      } else if (length(V_s) < d) {
+        V_s <- c(V_s, rep(0, d - length(V_s))) 
+      }
+      
       for(n in 1:Nn){
         probs_test[n] <- if(outcome=="binary"){pnorm(t(W_s) %*% Xx[n,,] %*% t(t(V_s)))}else{t(W_s) %*% Xx[n,,] %*% t(t(V_s))}
       }
@@ -386,8 +410,29 @@ predict.MSMW <- function(Xtest,outcome="binary",R, Ws, Vs,burn_in=1000){
     }
   }else{
     for(t in 1:(length(Ws)-burn)){
-      Ws_r <- matrix(Ws[[t]],ncol = R)
-      Vs_r <- matrix(Vs[[t]],ncol = R)
+      Wst <- Ws[[t]]
+      Ws_t <- Wst[1:((length(Wst) %/% R) * R )] 
+      Ws_r <- matrix(Ws_t, ncol = R)
+      
+      Xxr1 <- matrix(0, nrow = ncol(Xx), ncol = R)
+     #browser()
+      if (nrow(Xxr1) > nrow(Ws_r)){
+      Ws_r <- rbind(Ws_r, matrix(0, nrow = nrow(Xxr1) - nrow(Ws_r), ncol = R))
+      }else if (nrow(Xxr1) < nrow(Ws_r)) {
+        Ws_r <- Ws_r[1:nrow(Xxr1), ]
+      }
+      
+      Vst <- Vs[[t]]
+      Vs_t <- Vst[1:((length(Vst) %/% d) * d )] 
+      Vs_r <- matrix(Vs_t, ncol = d)
+
+      if (d > nrow(Vs_r)){
+        Vs_r <- rbind(Vs_r, matrix(0, nrow = d - nrow(Vs_r), ncol = d))
+      }
+      
+      P <- dim(Xxr1)[1] 
+      d <- dim(Xx)[3] 
+      #
       for(n in 1:Nn){
         for(r in 1:R){
           Xxr1[,r] <-  Xx[n,,] %*% Vs_r[,r]

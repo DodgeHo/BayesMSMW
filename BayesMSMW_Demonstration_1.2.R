@@ -10,7 +10,7 @@
 
 ## Usage
 
-BayesMSMW(X.list,Y.list,N_sim=11000,burn_in=1000,Alpha=1,Beta=NULL,multi.source="yes",rank=2,outcome="binary")
+#BayesMSMW(X.list,Y.list,N_sim=11000,burn_in=1000,Alpha=1,Beta=NULL,multi.source="yes",rank=2,outcome="binary")
   
 ## Arguments
 
@@ -35,35 +35,49 @@ BayesMSMW(X.list,Y.list,N_sim=11000,burn_in=1000,Alpha=1,Beta=NULL,multi.source=
 #"Ws", chain of estimated way coefficients, used for prediction
 #"Vs", chain of estimated way coefficients, used for prediction
 
+# Define a function to check and install missing packages
+install_if_missing <- function(packages) {
+  # Get the list of already installed packages
+  installed_packages <- rownames(installed.packages())
+  
+  # Loop through each package and install if it's not already installed
+  for (pkg in packages) {
+    if (!pkg %in% installed_packages) {
+      install.packages(pkg)
+    }
+  }
+}
+
+# List of required packages
+required_packages <- c("expm", "MASS", "truncnorm", "dplyr", "abind")
+
+# Call the function to install missing packages
+install_if_missing(required_packages)
+
 
 ######################################
 # Example
 ######################################
 
 
-
-
 # Generate data X
 N <- 100
-P <- 10
-P1 <- 5
-P2 <- 5
-d <- 2
+P <- 6
+P1 <- 3
+P2 <- 3
+d <- 5
 errvar <- 1
 x <- rnorm((N*(P)*(d)),0,1)
-X <- array(c(x0), dim = c(N,P,d))
+X <- array(c(x), dim = c(N,P,d))
 
 # True values of parameters
 true_tau <- 1/rgamma(1,1,1)
 true_tau1 <- 1/rgamma(1,1,1)
 ratio <- .5
-
 true_v <- rnorm(d,mean = 0, sd = sqrt(true_tau))  
-true_w1 <- norm(P1,mean = 0, sd = sqrt(true_tau1))
-true_w2 <- norm(P2,mean = 0, sd = ratio*sqrt(true_tau1))  
-
+true_w1 <- rnorm(P1,mean = 0, sd = sqrt(true_tau1))
+true_w2 <- rnorm(P2,mean = 0, sd = ratio*sqrt(true_tau1))  
 true_w <- c(true_w1,true_w2)
-
 true_B <- as.vector(true_w %*% t(true_v))
 
 mu <- c()
@@ -75,7 +89,6 @@ for(n in 1:N){
 y <- rnorm(N,mean=mu,sd=rep(errvar,N))
 Y <- y
 
-
 # Generate Test data
 xx0 <- rnorm((N*(P)*(d)),0,1)
 Xtest <- array(c(xx0), dim = c(N,P,d))
@@ -83,7 +96,7 @@ mutest <- c()
 for(n in 1:N){
   mutest[n] <- (t(true_w) %*% Xtest[n,,] %*% t(t(true_v)))
 }
-yy <- rnorm(N,mean=mu,sd=rep(errvar,N))
+yy <- rnorm(N,mean=mutest,sd=rep(errvar,N))
 Ytest <- yy
 
 
@@ -94,15 +107,12 @@ Xlist2 <- X[,c(6:10),]
 Xlistfull <- list(Xlist1,Xlist2)
 
 func.test <- BayesMSMW(X.list=Xlistfull,Y.list = Y,multi.source = "yes",rank = 1,outcome = "continuous")
-
-
 func.test$TrainErr
+func.pred <- predict.MSMW(Xtest=Xtest,R=1, Ws=func.test$Ws, Vs=func.test$Vs,outcome = "continuous")
 
-
-func.pred <- predict.MSMW(Xtest=Xtest,R=1, Ws=func.test.2$Ws, Vs=func.test.2$Vs,outcome = "continuous")
-
-
-misclas <- Ytest - func.pred$prediction
-relative_mse <- sum((misclas)^2)/sum((class_tru^2))
+class_tru <- Ytest  # Define class_tru as the true values of Ytest
+misclas <- class_tru - func.pred$prediction  # Adjusted to subtract predictions directly
+relative_mse <- sum((misclas)^2) / sum((class_tru^2))
+print(relative_mse)
 
 
